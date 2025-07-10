@@ -45,7 +45,7 @@ This generates the dataset file `protected_environment_learning.arrow` which is 
 This generates the dataset `optimality_of_RL.arrow` which is required to create Figure A1. 
 4. `RLUtilities.jl` contains common Reinforcement Learning code used by all the other simulation scripts.
 
-All of these codes are very computationally expensive and were run on a High Performance Computing Cluster with hundreds of CPU cores for several days. The codes can be run as-is on a cluster managed by SLURM and will scale to any resource configuration. 
+Each of these codes are very computationally expensive and were run on a High Performance Computing Cluster with hundreds of CPU cores running for several days. The codes can be run as-is on a cluster managed by SLURM and will scale to any resource configuration (multiple cores on a single node or distributed across nodes). 
 To run on a personal computer and have it finish in a reasonable amount of time, the parameters of the simulations (within each script file) can be modified in the following ways.
 - Reduce the number of experiments for each parameter combination by modifying the variable `number_experiments`
 - Reduce the number of parameters of `ρ` and `ϕ`, by changing the step length. That is, instead of `ρ=0.01:0.01:0.99`, having `ρ=0.1:0.1:0.9` will reduce the number of parameters by a factor of 10 and make the figure more blocky.
