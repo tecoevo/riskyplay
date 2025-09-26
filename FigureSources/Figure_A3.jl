@@ -1,4 +1,16 @@
-# load packages and setup
+# -------------------------------------------------------------------------------------------------------
+# This script loads data calculated using "protected_environment_learning_simulations.jl" 
+# to plot examples of the effects of a protected environment for learning on relative re-learning time
+# for a range of scaled developmental times and different environment parameters 
+# and protection level of juvenile phase.
+#
+# Data from "protected_environment_learning_simulations.jl" provides the re-learning time
+# for different enviromental parameters, protection level and developmental times
+# -------------------------------------------------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Load packages 
+# ------------------------------------------------------------
 using DataFrames
 using DataFramesMeta
 using Arrow
@@ -7,7 +19,10 @@ using Chain
 using Measurements
 using Measurements: value, uncertainty
 
-# plotting theme
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -31,6 +46,18 @@ theme = Theme(
 )
 set_theme!(theme)
 
+# functions for plotting with measurement values
+function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
+    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
+end
+function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
+    value.(x)
+end
+
+# ------------------------------------------------------------
+# Load data 
+# ------------------------------------------------------------
+
 load_data(name::String) = open(name, "r") do file 
     copy(DataFrame(Arrow.Table(file))) 
 end
@@ -43,15 +70,6 @@ ArrowTypes.toarrow(m::Measurement{T}) where {T} = (m.val, m.err)
 ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
-
-# functions for plotting with measurement values
-function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
-    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
-end
-function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
-    value.(x)
-end
-
 Base.typemin(::Type{Measurement{T}}) where {T <: AbstractFloat} = typemin(T) ± zero(T)
 
 function subset_scaled_developmental_time(df, value)
@@ -66,7 +84,12 @@ function subset_scaled_developmental_time(df, value)
 end
 
 # load the dataset
-df = load_data("../Datasets/protected_environment_learning.arrow")
+df = load_data("protected_environment_learning.arrow")
+
+# ------------------------------------------------------------
+# Plot the data automatically in a loop for 
+# all the rows and columns
+# ------------------------------------------------------------
 
 # learning time curves for all parameter values
 Eis = 3:-1:0
@@ -77,7 +100,7 @@ for (j, dev_time) in enumerate(scaled_developmental_times)
     for (i, Ei) in enumerate(Eis)
         df3 = @rsubset(df2, :Ei_juvenile == Ei)
         ax = Axis(fig[i,j]; xlabelpadding = 10, xticklabelpad = -2, yaxisposition = :right, xaxisposition = :top, ylabelpadding = 10, yticklabelpad = 3, xticks = 0.2:0.2:0.8, yticks = 0.2:0.2:0.8, xlabelsize = 25, ylabelsize = 25, xticklabelsize = 20, yticklabelsize = 20)
-        Ei == 3 && j == 5 && (ax.xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic), offset = (9, 0)))
+        Ei == 3 && j == 5 && (ax.xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (9, 0)))
         j == 10 && Ei == 1 && (ax.ylabel = rich("Capture probability ", rich("ϕ", font = :italic), offset = (8, 0)))
         Ei != first(Eis)  && hidexdecorations!(ax)
         dev_time != last(scaled_developmental_times) && hideydecorations!(ax)
@@ -85,9 +108,13 @@ for (j, dev_time) in enumerate(scaled_developmental_times)
     end
 end
 
+# add the colorbar for legend
 num_plots_x = length(scaled_developmental_times)
 Colorbar(fig[:, num_plots_x+1], hm, label = "Difference in relearning time", labelsize = 26, ticklabelsize = 21, width = 20)
 
+# ------------------------------------------------------------
+# Add the overarching left and bottom axes
+# ------------------------------------------------------------
 length_of_axis = 10
 length_of_plot = length_of_axis / num_plots_x
 ticks_positions_x = (length_of_plot/2):length_of_plot:(10-length_of_plot/2)
@@ -119,4 +146,7 @@ arrows!(leftax.parent.scene, points, directions; arrowsize = 15)
 
 display(fig)
 
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 save("Figure_A3.pdf", fig)

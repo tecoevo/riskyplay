@@ -1,7 +1,12 @@
+#------------------------------------------------------------------------------
+# A collection of functions and constructs that are used in the RL simulations
+#------------------------------------------------------------------------------
+
 module RLUtilities
 
 export SMDPTDLearner, jump_time
-export StopWhenValueAndPolicyReaches, StepsEpisodesPerExperiment
+export StopWhenValueAndPolicyReaches, StopAfterTTime
+export TimeEpisodesPerExperiment
 export CircularArraySARJTSTraces, CircularArraySARJTSATraces
 
 using ReinforcementLearning
@@ -10,9 +15,12 @@ using ProgressMeter
 import CircularArrayBuffers.CircularArrayBuffer
 import CircularArrayBuffers
 
-#-----------------------------------------------------------------
+#---------------------------------------------------------------------------------
 # Trajectory Utilities
-#-----------------------------------------------------------------
+# To extend the functionality of the ReinforcementLearningTrajectories.jl package
+# This stores a trajectory with a jump time in addition to 
+# state, action, reward, terminal state
+#---------------------------------------------------------------------------------
 
 # SARS traces with Jump time
 const CircularArraySARJTSTraces = Traces{
@@ -101,7 +109,10 @@ max_length(t::Traces) = mapreduce(length, max, t.traces)
 
 
 #-----------------------------------------------------------------
-# SMDP TD learner algorithm 
+# Temporal Difference (TD0) learning algorithm for a 
+# Semi-Markov Decision Process, i.e. with variable jump times
+# The jump time is incorporated in order to calculate the 
+# discount factor per step
 #-----------------------------------------------------------------
 mutable struct SMDPTDLearner{algo} <: AbstractLearner
     approximator::TabularApproximator
@@ -160,22 +171,22 @@ function RLBase.optimise!(
 end
 
 #-----------------------------------------------------------------
-# Hook struct to count total steps and episodes in an experiment
+# Hook struct to count total time and episodes in an experiment
 #-----------------------------------------------------------------
-Base.@kwdef mutable struct StepsEpisodesPerExperiment <: AbstractHook
-    steps::Int = 0
+Base.@kwdef mutable struct TimeEpisodesPerExperiment <: AbstractHook
+    time::Int = 0
     episodes::Int = 0
 end
 
-Base.getindex(h::StepsEpisodesPerExperiment) = (h.steps, h.episodes)
+Base.getindex(h::TimeEpisodesPerExperiment) = (h.time, h.episodes)
 
-Base.push!(hook::StepsEpisodesPerExperiment, ::PostActStage, agent::AbstractPolicy, env::AbstractEnv) = hook.steps += 1
-Base.push!(hook::StepsEpisodesPerExperiment, ::PostEpisodeStage, agent::AbstractPolicy, env::AbstractEnv) = hook.episodes += 1
+Base.push!(hook::TimeEpisodesPerExperiment, ::PostActStage, agent::AbstractPolicy, env::AbstractEnv) = hook.time += jump_time(env)
+Base.push!(hook::TimeEpisodesPerExperiment, ::PostEpisodeStage, agent::AbstractPolicy, env::AbstractEnv) = hook.episodes += 1
 
-#----------------------------------------------------------------------------------------------
+#----------------------------------------------------------------------------------
 # Stop condition to stop when the average value reaches within a threshold of a target value 
 # and policy composition reaches within a threshold of the target policy composition
-#----------------------------------------------------------------------------------------------
+#----------------------------------------------------------------------------------
 mutable struct StopWhenValueAndPolicyReaches{progress} <: AbstractStopCondition
     targetValue::Vector{Float64}
     targetPolicy::Vector{Int64}
@@ -241,5 +252,25 @@ function update!(stop::StopWhenValueAndPolicyReaches{true}, error)
 end
 
 function update!(_::StopWhenValueAndPolicyReaches{false}, _) end
+
+#----------------------------------------------------------------------------------
+# Stop condition to stop after given time of the SMDP has passed
+#----------------------------------------------------------------------------------
+mutable struct StopAfterTTime <: AbstractStopCondition
+    maxT::Int
+    curr::Int
+end
+
+function StopAfterTTime(maxT; curr = 0)
+    StopAfterNSteps(maxT, curr)
+end
+
+
+function check!(s::StopAfterTTime, agent, env)
+    isStop = s.curr >= s.maxT
+    Δt = jump_time(env)
+    s.curr += Δt
+    isStop
+end
 
 end # module end

@@ -1,4 +1,12 @@
-# load packages and setup
+# -------------------------------------------------------------------------------------------------------
+# This script loads data calculated using "optimality_of_RL.arrow" 
+# to plot the ensemble average learnt optimal policy obtained by Reinforcement Learning
+# along with the learning times required to complete learning.
+# -------------------------------------------------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Load packages 
+# ------------------------------------------------------------
 using DataFrames
 using Arrow
 using CairoMakie
@@ -9,7 +17,10 @@ using Measurements: value, uncertainty
 using Base.Iterators: product
 using TernaryDiagrams
 
-# plotting theme
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -33,6 +44,20 @@ theme = Theme(
 )
 set_theme!(theme)
 
+# functions for plotting with measurement values
+function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
+    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
+end
+function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
+    value.(x)
+end
+
+Measurements.value(x::Any) = x
+
+# ------------------------------------------------------------
+# Load data 
+# ------------------------------------------------------------
+
 load_data(name::String) = open(name, "r") do file 
     copy(DataFrame(Arrow.Table(file))) 
 end
@@ -46,15 +71,6 @@ ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
 
-# functions for plotting with measurement values
-function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
-    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
-end
-function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
-    value.(x)
-end
-Measurements.value(x::Any) = x
-
 # converting policy into color
 color_a = colorant"tomato" #"#ff4e00" #"#FF8C00"                     #dangerous
 color_b = colorant"#50f4d5ff" #"#00FF8C"         #both
@@ -66,16 +82,20 @@ composition_to_color((a, b, c)) = color_itp(a,b);
 composition_to_color(a) = color_itp(a[1], a[2])
 
 # load dataset of optimal policy learnt by reinforcement learning
-df = load_data("../Datasets/optimality_of_RL.arrow")
+df = load_data("optimality_of_RL.arrow")
 
 x = unique(df.ρ)
 n = length(x)
 color_grid =  reshape(composition_to_color.(df.policy_composition), (n, n))
 
+# ------------------------------------------------------------
+# Plot the data
+# ------------------------------------------------------------
+
 fig = Figure(size = (1200, 480))
 
 ### policy heatmap
-ax1 = Axis(fig[1,1]; xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic)), ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks = 0.2:0.2:0.8, yticks = 0.2:0.2:0.8, title = "Optimal policy", aspect = DataAspect())
+ax1 = Axis(fig[1,1]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic)), ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks = 0.2:0.2:0.8, yticks = 0.2:0.2:0.8, title = "Optimal policy", aspect = DataAspect())
 hm = heatmap!(ax1, x, x, color_grid)
 
 ### legend for heatmap
@@ -127,9 +147,9 @@ limits!(ax2, -0.32, 1.4, -0.4, 1.25)
 
 ### learning time heatmap
 
-ax3 = Axis(fig[1,3]; xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic)), ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks = 0.2:0.2:0.8, yticks = 0.2:0.2:0.8, title = "Learning time", aspect = DataAspect())
-hm = heatmap!(ax3, df.ρ, df.ϕ, df.learning_time_steps, colorscale = log10)
-Colorbar(fig[1,4], hm; label = "Learning time in steps")
+ax3 = Axis(fig[1,3]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic)), ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks = 0.2:0.2:0.8, yticks = 0.2:0.2:0.8, title = "Learning time", aspect = DataAspect())
+hm = heatmap!(ax3, df.ρ, df.ϕ, df.learning_time, colorscale = log10)
+Colorbar(fig[1,4], hm; label = "Learning time")
 
 rowsize!(fig.layout, 1, Aspect(1, 1))
 colsize!(fig.layout, 2, 200)
@@ -148,5 +168,9 @@ for (pos, label) in zip([1,3], ["A", "B"])
 end
 
 display(fig)
+
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 
 save("Figure_A1.pdf", fig)

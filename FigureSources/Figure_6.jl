@@ -1,4 +1,16 @@
-# load packages and setup
+# -------------------------------------------------------------------------------------------------------
+# This script loads data calculated using "protected_environment_learning_simulations.jl" 
+# to plot examples of the effects of a protected environment for learning on relative learning speed
+# for different environment parameters and protection level of juvenile phase.
+#
+# Data from "protected_environment_learning_simulations.jl" provides the re-learning time
+# for different enviromental parameters, protection level and developmental times
+# -------------------------------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------
+# Load packages 
+# ------------------------------------------------------------
 using DataFrames
 using DataFramesMeta
 using Arrow
@@ -8,6 +20,11 @@ using LsqFit
 using Measurements
 using Measurements: value, uncertainty
 
+
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
 # plotting theme
 theme = Theme(
     font = "Poppins Regular" ,
@@ -31,7 +48,18 @@ theme = Theme(
     axislegend = (;labelfont = "Poppins Regular", labelsize = 18)
 )
 set_theme!(theme)
-# figure width = 18 cm
+
+# functions for plotting with measurement values
+function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
+    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
+end
+function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
+    value.(x)
+end
+
+# ------------------------------------------------------------
+# Load data 
+# ------------------------------------------------------------
 
 load_data(name::String) = open(name, "r") do file 
     copy(DataFrame(Arrow.Table(file))) 
@@ -45,15 +73,15 @@ ArrowTypes.toarrow(m::Measurement{T}) where {T} = (m.val, m.err)
 ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
-
-# functions for plotting with measurement values
-function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
-    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
-end
-function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
-    value.(x)
-end
 Base.typemin(::Type{Measurement{T}}) where {T <: AbstractFloat} = typemin(T) ± zero(T)
+
+# load the dataset
+df = load_data("protected_environment_learning.arrow")
+
+# ------------------------------------------------------------
+# Fitting the exponential decay and 
+# calculating the relative learning speeds
+# ------------------------------------------------------------
 
 # functions for fitting exponential decay
 model_exp_decay(x, p) = exp.(-p[1]*x)
@@ -73,7 +101,7 @@ end
 function relative_learning_speeds(df; weighted = true)
     df_learning_speeds = @chain df begin
         @groupby(:ρ, :ϕ, :Ei_juvenile)
-        @combine(:decay_rate = fit_exponential_decay(:developmental_time, :relearning_time_steps))
+        @combine(:decay_rate = fit_exponential_decay(:developmental_time, :relearning_time))
         sort(:Ei_juvenile, rev = true)
         @groupby(:ρ, :ϕ)
         @transform(:decay_rate_reference = :decay_rate[1])
@@ -84,13 +112,14 @@ function relative_learning_speeds(df; weighted = true)
     return df_learning_speeds
 end
 
-# load the dataset
-df = load_data("../Datasets/protected_environment_learning.arrow")
-
 df2 = @chain df begin
     @rsubset(:scaled_developmental_time <= 1.0)
     relative_learning_speeds()
 end 
+
+# ------------------------------------------------------------
+# Plot the calculated metrics
+# ------------------------------------------------------------
 
 fig = Figure(size = (1200, 390))
 colorrange = (-0.5, 0.5)
@@ -106,7 +135,7 @@ hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.relative_decay_rate_log; colormap, colorr
 
 Ei_juvenile = 2
 df3 = @rsubset(df2, :Ei_juvenile == Ei_juvenile)
-ax2 = Axis(fig[1,2]; xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic), offset = (15, 0)), xticks, aspect, xlabelpadding = 0)
+ax2 = Axis(fig[1,2]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, aspect, xlabelpadding = 0)
 hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.relative_decay_rate_log; colormap, colorrange)
 
 Ei_juvenile = 1
@@ -134,4 +163,8 @@ arrows!(topax.parent.scene, points, directions)
 
 display(fig)
 
+
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 save("Figure_6.pdf", fig)

@@ -1,6 +1,6 @@
-## -------------------------------------------------------
-# parameters
-# -------------------------------------------------------
+## ---------------------------------------------------------------------------
+# Set parameters
+# ----------------------------------------------------------------------------
 # Ec: animal needs to reach this to get a reward 
 # ρ:  proportion of dangerous prey
 # m:  rate of metabolism: time*metabolism = energy spent (should be positive) (integer)
@@ -36,7 +36,7 @@ juvenile_parameters = (
 
 adulthood_parameters = (; juvenile_parameters..., Ei = 4)
 
-developmental_time = vcat(0:1_000:50_000, 55_000:5_000:150_000, 160_000:10_000:230_000)            # number of steps to run the learning_process
+developmental_time = vcat(0:1_000:50_000, 55_000:5_000:150_000, 160_000:10_000:230_000)            # amount of time to run the learning_process
 
 learning_convergence_threshold = 0.25 # how close the average value and policy needs to come to the average optimal value to consider learning complete
 
@@ -44,17 +44,17 @@ number_experiments = 10_000
 
 #learning algorithm
 α = 0.01 # learning rate of learning algorithm
-ϵ = 0.2 # exploration rate 
+ϵ = 0.2  # exploration rate 
 maximum_episodes_adulthood = 200_000 # number of episodes after changing the environmental parameters
 
+# File to which the output of the simulation will be stored as a .arrow file
 output_file_path = ""
 output_file_name = "protected_environment_learning"
 
-## -------------------------------------------------------
+## --------------------------------------------------------------------------
 # load packages and set up
-# -------------------------------------------------------
+# ----------------------------------------------------------------------------
 using Distributed
-using CairoMakie
 using Base.Iterators
 using Arrow
 using Folds
@@ -62,6 +62,9 @@ using DataFramesMeta
 using Chain
 using SlurmClusterManager
 
+# Automatically add as many processes as available.
+# For a personal computer this is the number of CPU threads.
+# For a batch job on a SLURM cluster, this requires the option "ntasks" to be set.
 if nprocs() == 1
     if haskey(ENV, "SLURM_JOB_ID") || haskey(ENV, "SLURM_JOBID")
         addprocs(SlurmManager())
@@ -98,7 +101,12 @@ ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
 
 @everywhere begin
-# discrete normal disctribution for energy
+
+## ------------------------------------------------------------------------------
+# Discrete normal distribution for energy changes
+# It is a normal distribution that is discretised at integer values 
+# and then truncated at 0 and Ec - E
+# --------------------------------------------------------------------------------
 struct DiscreteNormal
     dist
     function DiscreteNormal(μ, σ)
@@ -116,7 +124,9 @@ Distributions.rand!(rng::AbstractRNG, d::DiscreteNormal, A::AbstractArray{<:Inte
 @memoize Distributions.cdf(dist::DiscreteNormal, x::AbstractArray{Int}) = cdf(dist.dist, collect(x) .+ 1)
 @memoize Distributions.ccdf(dist::Dirac, x::Real) = x <= dist.value ? 1.0 : 0.0
 
+## ------------------------------------------------------------------------------
 # Deterministic dynamic programming functions
+# ------------------------------------------------------------------------------
 function surv_prob(rate, time) 
     exp(-rate*time)
 end
@@ -135,7 +145,8 @@ function single_outcome_return(V, Ec, dist_pdf, dist_ccdf, energy, ::Val{:negati
     return G
 end
 
-
+# Calculate the expected return of taking action [action] when in energy [energy],
+# as a sum of expected returns of all the possible outcomes from that action
 function exp_return(V,Ec, dist_pdfs, dist_ccdfs,e_signs,p,s,action,energy)
     G = 0.
     @inbounds for outcome in 1:3
@@ -145,7 +156,11 @@ function exp_return(V,Ec, dist_pdfs, dist_ccdfs,e_signs,p,s,action,energy)
     return G
 end
 
-function value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = 1e-6, maxiter = 10_000)
+# Perform the value iteration algorithm to calculate optimal value for given the transition matrices
+# For each energy level, calculate the estimate of expected value given the current estimate
+# Repeat this loop until it converges and the changes are below tolerance [tol]
+# Output: value function - vector of length Ec+1, storing the value of energies 0, ..., Ec.
+function value_iteration!(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = 1e-6, maxiter = 10_000)
     Δ = 0.
     actions = [2;3;1]
     @inbounds for _ in 1:maxiter
@@ -156,35 +171,20 @@ function value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; t
             Δ = max(Δ, abs(v-V[energy+1])/(v==0 ? 1 : v))
         end
         
-        @inbounds v = V[Ec+1]
-        @inbounds V[Ec+1] = 1. + sr*V[Ec+1 - er]
-        Δ = max(Δ, abs(v-V[Ec+1])/(v==0 ? 1 : v))
+        @inbounds V[Ec+1] = 1.
 
         if Δ < tol 
             break 
         end
     end
-    return V, Δ
+    return V
 end
 
-function value_from_policy(policy, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = 1e-6, maxiter = 10_000)
-    V = zeros(Float64, Ec+1)
-    V[end] = 1.
-    Δ = 0.
-    @inbounds for _ in 1:maxiter
-        Δ = 0.
-        @inbounds for energy in 1:Ec-1
-            v = V[energy+1]
-            V[energy+1] = exp_return(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s, policy[energy], energy)
-            Δ = max(Δ, abs(v-V[energy+1])/(v==0 ? 1 : v))
-        end
-        if Δ < tol
-            break
-        end
-    end
-    return V, Δ
-end
-
+# Given the optimal value, calculate the optimal policy
+# For each energy level, check the expected returns of each action,
+# and pick the one with the highest expected return 
+# Output: optimal policy - vector of length Ec+1, storing the optimal action for energy level 0, ..., Ec.
+# The actions are represented by integers- 1: indiscriminate attack, 2: risk-prone attack, 3: risk-averse attack  
 function policy_from_optimal_value(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s)
     policy = zeros(Int, Ec-1)
     actions = [2;3;1]
@@ -194,32 +194,48 @@ function policy_from_optimal_value(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s)
     return policy
 end
 
+# Calculates the compressed probability matrix for the action and outcome, given parameters. 
+# The rows represent the actions taken and the columns, the outcomes.
+# Row1: indiscriminate attack, Row2: risk-prone attack, Row3: risk-averse attack
+# The outcomes are represented as follows:
+#[ Obtain safe prey, obtain dangerous prey, get injured ;
+#  Metabolic loss,   obtain dangerous prey, get injured ;
+#  Obtain safe prey, metabolic loss,           ---       ]
 function prob(ρ, ϕ)
     [ 1-ρ  ρ*ϕ  ρ*(1-ϕ) ;
       1-ρ  ρ*ϕ  ρ*(1-ϕ) ;
       1-ρ  ρ    0        ]
 end
 
-function energy(m, Es, Ed, Ei)
-    [ Es   Ed   -Ei ;
-      -m   Ed   -Ei ;
-      Es   -m   0    ]
-end
-
+# Sets the constant compressed matrix for the signs of energy changes 
+# for action and outcome, given parameters. 
+# The format is the same as the probability matrix above.
 const e_signs = Val.([ :positive   :positive   :negative ;
                        :negative   :positive   :negative ;
                        :positive   :negative   :positive  ])
 
+# Sets the compressed transition time matrix 
+# for action and outcome, given parameters. 
+# The format is the same as the probability matrix above.
 function jump_times(hs, hd, hi)
     [ hs + 1   hd + 1   hi + 1 ;
       1        hd + 1   hi + 1 ;
       hs + 1   1        1       ]
 end
 
+# Calculates the compressed survival probability matrix 
+# for action and outcome, given parameters. 
+# The format is the same as the probability matrix above.
 function surv(d, hs, hd, hi) 
     surv_prob.(d,jump_times(hs, hd, hi))
 end
 
+# Sets the compressed matrix of energy distributions for the different 
+# actions and outcomes. The distributions show what are the possible 
+# energy changes for each given outcome, with a given mean and variance.
+# The distributions are discretised normal distributions that are 
+# truncated at 0.
+# The format is the same as the probability matrix above.
 function distributions(m, Δm, Es, ΔEs, Ed, ΔEd, Ei, ΔEi)
     ds = (ΔEs*Es > 0) ? DiscreteNormal(Es, ΔEs*Es) : Dirac(Es)
     dd = (ΔEd*Ed > 0) ? DiscreteNormal(Ed, ΔEd*Ed) : Dirac(Ed)
@@ -231,7 +247,9 @@ function distributions(m, Δm, Es, ΔEs, Ed, ΔEd, Ei, ΔEi)
       ds   dm   Dirac(0)  ]
 end
 
-function calc_value_policy(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei, ΔEi, hi, er, sr; tol = 1e-6, maxiter = 10_000)
+# Calculates the optimal value and policy functions given the parameter values of the environment
+# Calculates the transition probability matrices and passes this to the main value iteration function.
+function calc_value_policy(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei, ΔEi, hi; tol = 1e-6, maxiter = 10_000)
     # transition probabilities
     p = prob(ρ, ϕ)
     dists = distributions(m, Δm, Es, ΔEs, Ed, ΔEd, Ei, ΔEi)
@@ -242,7 +260,7 @@ function calc_value_policy(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei
     V = zeros(Float64, Ec + 1)
     V[end] = 1.
 
-    V, err = value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = tol, maxiter = maxiter)
+    V = value_iteration!(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = tol, maxiter = maxiter)
     policy = policy_from_optimal_value(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s)
     return V[2:end-1], policy
 end
@@ -251,13 +269,9 @@ function calc_value_policy(; Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, 
     calc_value_policy(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei, ΔEi, hi)
 end
 
-function calc_value_policy(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei, ΔEi, hi) 
-    calc_value_policy(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei, ΔEi, hi, 1, 0.; tol = 1e-9)
-end
-
-## -------------------------------------------------------
-# define the environment
-# -------------------------------------------------------
+## ------------------------------------------------------------------------------
+# Define the environment as required by the ReinforcementLearning.jl package
+# -------------------------------------------------------------------------------
 mutable struct TwoPreyEnv <: AbstractEnv
     Ec::Int64
     energy::Int64
@@ -305,22 +319,33 @@ mutable struct TwoPreyEnv <: AbstractEnv
         new(Ec, rand(1:Ec-1), 0., 0., e_signs, c, t, s, dists)
     end
 end
-TwoPreyEnv(Ec, ρ, ϕ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, Ei, ΔEi, hi) = TwoPreyEnv(; Ec = Ec, ρ = ρ, ϕ = ϕ, d = d, m = m, Δm = Δm, Es = Es, ΔEs = ΔEs, hs = hs, Ed = Ed, ΔEd = ΔEd, hd = hd, Ei = Ei, ΔEi = ΔEi, hi = hi)
-TwoPreyEnv() = TwoPreyEnv(100, 0.5, 0.9, 0.1, 1, 0.01, 2, 1.5, 1, 10, 1.5, 1, 4, 1.5, 1)
 
+# Possible actions taken by the agent. 1: indiscriminate attack, 2: risk-prone attack, 3: risk-averse attack
 RLBase.action_space(::TwoPreyEnv) = [1; 2; 3]
-RLBase.state_space(env::TwoPreyEnv) = 0:env.Ec+1  # Ec is the terminal state.
+
+# Possible state (energy) values of the environment. E = 0, ..., Ec. 
+# Ec + 1 is the terminal goal state. From Ec the state moves to Ec + 1 automatically. 
+RLBase.state_space(env::TwoPreyEnv) = 0:env.Ec+1  
+
+# Reward function. Reward is given once the agent reaches the terminal state, which is Ec + 1.
 RLBase.reward(env::TwoPreyEnv) = env.energy == env.Ec+1
+
+# A single environment is terminated, when the energy reaches zero or the terminal goal state.
 RLBase.is_terminated(env::TwoPreyEnv) = (env.energy == 0) || (env.energy == env.Ec + 1)
+
+
 RLBase.state(env::TwoPreyEnv, ::Observation{Any}, ::DefaultPlayer) = env.energy
 RLUtilities.jump_time(env::TwoPreyEnv) = env.Δt
 
+# Resetting the environment after an episode is completed means clearing the jump time, reward 
+# and randomly initialising the energy between 1 and Ec-1.
 function RLBase.reset!(env::TwoPreyEnv) 
     env.energy = rand(1:env.Ec-1)
     env.Δt = 0.
     env.reward = 0.
 end
 
+# This function enacts the main dynamics of the Two-prey environment.
 function RLBase.act!(x::TwoPreyEnv,action)
     if x.energy == x.Ec # if energy is at the threshold, move to terminal state
         x.energy += 1
@@ -347,6 +372,11 @@ function RLBase.act!(x::TwoPreyEnv,action)
     end 
 end
 
+## ------------------------------------------------------------------------------
+# Reinforcement learning simulation functions
+# ------------------------------------------------------------------------------
+
+# Creates the learning agent with selected hyperparameters for use in the learning simulations
 function create_agent(NS, NA, α, d, ϵ)
     approximator = TabularQApproximator(; n_state = NS, n_action = NA, init = 0.)
     learner = SMDPTDLearner(
@@ -391,6 +421,7 @@ function create_agent(NS, NA, α, d, ϵ)
     return agent, performance_policy
 end
 
+# Performs a single learning experiment of the two phase model, and calculates the # metrics of adult performance and re-learning time for a chosen developmental time
 function single_learning_run(juvenile_parameters, adulthood_parameters, developmental_time, maximum_episodes_adulthood, learning_convergence_threshold, opt_value_adult, opt_policy_adult, opt_value_dev, opt_policy_dev, agent, performance_policy)
 
     # creating the environments and wrapped environments
@@ -422,7 +453,7 @@ function single_learning_run(juvenile_parameters, adulthood_parameters, developm
     );
     
 
-    stop_condition_1 = StopAfterNSteps(developmental_time, is_show_progress = false)
+    stop_condition_1 = StopAfterTTime(developmental_time)
 
     stop_condition_2 = StopWhenValueAndPolicyReaches(; 
         targetValue = opt_value_dev, 
@@ -458,24 +489,26 @@ function single_learning_run(juvenile_parameters, adulthood_parameters, developm
         max_episodes = maximum_episodes_adulthood,
         show_progress = false
     )
-    num_steps_adult = StepsEpisodesPerExperiment()
+    time_adult = TimeEpisodesPerExperiment()
 
     agent.policy.learner.d = adulthood_parameters.d
     run(
         agent,
         wrapped_adult_env,
         stop_condition,
-        num_steps_adult
+        time_adult
     ) 
     
-    relearning_time_steps = num_steps_adult.steps
-    relearning_time_episodes = num_steps_adult.episodes
+    relearning_time = time_adult.time
+    relearning_time_episodes = time_adult.episodes
 
-    return  rewards_per_episode, relearning_time_steps, relearning_time_episodes
+    return  rewards_per_episode, relearning_time, relearning_time_episodes
 end
 
 end # distributed functions
 
+# Runs learning experiments multiple times for a single set of parameters 
+# to obtain averaged metrics in a parallelized manner
 function ensemble_learning_runs(juvenile_parameters, adulthood_parameters, developmental_time, maximum_episodes_adulthood, learning_convergence_threshold, α, ϵ; channel, number_experiments = 1)
 
     # calculate optimal state value for the adulthood environment
@@ -495,27 +528,29 @@ function ensemble_learning_runs(juvenile_parameters, adulthood_parameters, devel
     end
 
     rewards_per_episode = zeros(number_experiments)
-    relearning_time_steps = zeros(number_experiments)
+    relearning_time = zeros(number_experiments)
     relearning_time_episodes = zeros(number_experiments)
     for i in 1:number_experiments
-        rewards_per_episode[i], relearning_time_steps[i], relearning_time_episodes[i] = results[i]
+        rewards_per_episode[i], relearning_time[i], relearning_time_episodes[i] = results[i]
     end
 
     filtered_indices = relearning_time_episodes .< maximum_episodes_adulthood
     rewards_per_episode = rewards_per_episode[filtered_indices]
-    relearning_time_steps = relearning_time_steps[filtered_indices]
+    relearning_time = relearning_time[filtered_indices]
     number_experiments_actual = sum(filtered_indices)
 
     return  mean(rewards_per_episode)     ±   std(rewards_per_episode),
-            mean(relearning_time_steps)   ±   std(relearning_time_steps),
+            mean(relearning_time)   ±   std(relearning_time),
             number_experiments_actual
 end
 
+# Runs the learning experiment for multiple parameter combinations in a parallelized manner 
+# and outputs the progress to standard error stream.
 function multiple_parameter_learning_runs(pars_iterable, number_experiments)
     num_pars = length(pars_iterable)
     pbar = Progress(num_pars * number_experiments; dt = 10)
     rewards_per_episode = zeros(Measurement, num_pars)
-    relearning_time_steps = zeros(Measurement, num_pars)
+    relearning_time = zeros(Measurement, num_pars)
     number_experiments_actual = zeros(Int64, num_pars)
 
     channel = RemoteChannel(() -> Channel{Bool}(), 1)
@@ -534,32 +569,13 @@ function multiple_parameter_learning_runs(pars_iterable, number_experiments)
     results = fetch(results)
 
     for i in 1:num_pars
-        rewards_per_episode[i], relearning_time_steps[i], number_experiments_actual[i] = results[i]
+        rewards_per_episode[i], relearning_time[i], number_experiments_actual[i] = results[i]
     end
 
-    return  rewards_per_episode, relearning_time_steps, number_experiments_actual
+    return  rewards_per_episode, relearning_time, number_experiments_actual
 end
 
-# plotting theme
-theme = Theme(
-    font = "Poppins Regular" ,
-    Axis = (;
-        xticklabelsize = 14, 
-        xticklabelfont = "Poppins Regular",
-        yticklabelsize = 14, 
-        yticklabelfont = "Poppins Regular",
-        xlabelsize = 20, 
-        xlabelfont = "Poppins Regular",
-        ylabelsize = 20, 
-        ylabelfont = "Poppins Regular",
-        titlefont = "Poppins Medium", 
-        titlesize = 20
-        ), 
-    Label = (; font = "Poppins Regular"),
-    Colorbar = (;labelfont = "Poppins Regular", labelsize = 20)
-)
-set_theme!(theme)
-
+# Write to file which parameters will be used in the simulation
 parameters = ["juvenile_parameters", "adulthood_parameters", "full_factorial", "developmental_time", "learning_convergence_threshold", "number_experiments", "α", "ϵ", "output_file_path", "output_file_name"]
 
 open(output_file_path*output_file_name*"_pars.txt", "w") do file
@@ -603,7 +619,7 @@ shuffle!(all_pars_iterable)
 
 start = time()
 
-rewards_per_episode, relearning_time_steps, number_experiments_actual = multiple_parameter_learning_runs(all_pars_iterable, number_experiments)
+rewards_per_episode, relearning_time, number_experiments_actual = multiple_parameter_learning_runs(all_pars_iterable, number_experiments)
 
 fin = time()
 println("Time elapsed: $(round(fin - start; digits = 3)) s")
@@ -634,7 +650,7 @@ columns = (;
     number_experiments = Int64[],
 
     adult_rewards_per_episode = Measurement{Float64}[],
-    relearning_time_steps = Measurement{Float64}[],
+    relearning_time = Measurement{Float64}[],
     number_experiments_actual = Int64[]
 )
 
@@ -648,18 +664,23 @@ end
 for (env_pars, rest...) in zip(
     all_pars_iterable, 
     rewards_per_episode,
-    relearning_time_steps,
+    relearning_time,
     number_experiments_actual
 )
     push!(df, (unpack_pars(env_pars)..., number_experiments, rest...))
 end
 
 df = @chain df begin
-    @select(:ρ, :ϕ, :Ei_juvenile, :Ei, :Ec, :d, :m, :Es, :Ed, :hs, :hd, :hi, :developmental_time, :maximum_episodes_adulthood, :learning_convergence_threshold, :learning_rate, :exploration_rate, :number_experiments, :number_experiments_actual, :adult_rewards_per_episode, :relearning_time_steps)
+    @select(:ρ, :ϕ, :Ei_juvenile, :Ei, :Ec, :d, :m, :Es, :Ed, :hs, :hd, :hi, :developmental_time, :maximum_episodes_adulthood, :learning_convergence_threshold, :learning_rate, :exploration_rate, :number_experiments, :number_experiments_actual, :adult_rewards_per_episode, :relearning_time)
     rename(:Ei => "Ei_adult")
 end
 
-# calculate and add useful metrics to the dataframe
+## ----------------------------------------------------------------------------
+# Calculation of metrics
+# Calculates scaled developmental time, normalised adult performance, 
+# normalised relearning time, relative relearning time and 
+# relative adult performance and relative relearning time
+# -----------------------------------------------------------------------------
 df_dp = load_data("adult_environment_optimal_performance.arrow")
 df_dp = @chain df_dp begin
     @select(:ρ, :ϕ, :Ei, :rewards_per_episode_optimum)
@@ -673,9 +694,9 @@ df = @chain df begin
 
     @groupby(:ρ, :ϕ, :Ei_juvenile)
     @transform(
-        :scaled_developmental_time = :developmental_time ./ value(:relearning_time_steps[1]),
+        :scaled_developmental_time = :developmental_time ./ value(:relearning_time[1]),
         :normalised_adult_performance = (:adult_rewards_per_episode .- :adult_rewards_per_episode[1]) ./ (:rewards_per_episode_optimum .- :adult_rewards_per_episode[1]),
-        :normalised_relearning_time = :relearning_time_steps ./ :relearning_time_steps[1],
+        :normalised_relearning_time = :relearning_time ./ :relearning_time[1],
     )
     sort(:Ei_juvenile, rev = true)
     @groupby(:ρ, :ϕ, :developmental_time)
@@ -685,4 +706,7 @@ df = @chain df begin
     )
 end
 
-Arrow.write(output_file_path*output_file_name*".arrow", df)
+## ----------------------------------------------------------------------------
+# Save the data to the file with the chosen name and location.
+# -----------------------------------------------------------------------------
+Arrow.write(output_file_path*output_file_name*".arrow", df; compress = :lz4)

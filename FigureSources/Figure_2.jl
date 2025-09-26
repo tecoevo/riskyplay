@@ -1,4 +1,13 @@
+# -------------------------------------------------------------------------------------------------------
+# This script uses Dynamic Programming to calculate the optimal policy 
+# for a chosen range of parameter values and plot them as a heatmap and save to disk.
+# This script might take a few minutes to run on fast personal computers.
+# -------------------------------------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------
 # Load required packages
+# --------------------------------------------------------------------
 using Distributed: @everywhere, nworkers, addprocs, pmap
 nworkers() > 1 || addprocs()
 using CairoMakie
@@ -13,6 +22,11 @@ using Colors
 @everywhere using Interpolations: linear_interpolation
 @everywhere using QuadGK: quadgk
 
+## ------------------------------------------------------------------------------
+# Discrete normal distribution for energy changes
+# It is a normal distribution that is discretised at integer values 
+# and then truncated at 0 and Ec - E
+# --------------------------------------------------------------------------------
 # Calculation functions
 @everywhere struct DiscreteNormal
     dist
@@ -31,6 +45,10 @@ end
 @memoize Distributions.mean(dist::DiscreteNormal) = dot(pdf(dist, 0:100), 0:100)
 @memoize Distributions.var(dist::DiscreteNormal) = dot(pdf(dist, 0:100), (0:100) .^2 ) - (mean(dist))^2
 
+
+## ------------------------------------------------------------------------------
+# Deterministic dynamic programming functions
+# ------------------------------------------------------------------------------
 @everywhere function surv_prob(rate, time) 
     exp(-rate*time)
 end
@@ -49,6 +67,8 @@ end
     return G
 end
 
+# Calculate the expected return of taking action [action] when in energy [energy],
+# as a sum of expected returns of all the possible outcomes from that action
 @everywhere function exp_return(V,Ec, dist_pdfs, dist_ccdfs,e_signs,p,s,action,energy)
     G = 0. 
     @inbounds for outcome in 1:3
@@ -58,7 +78,11 @@ end
     return G
 end
 
-@everywhere function value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = 1e-6, maxiter = 10_000)
+# Perform the value iteration algorithm to calculate optimal value for given the transition matrices
+# For each energy level, calculate the estimate of expected value given the current estimate
+# Repeat this loop until it converges and the changes are below tolerance [tol]
+# Output: value function - vector of length Ec+1, storing the value of energies 0, ..., Ec.
+@everywhere function value_iteration!(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = 1e-6, maxiter = 10_000)
     Δ = 0.
     actions = [2;3;1]
     @inbounds for _ in 1:maxiter
@@ -69,17 +93,20 @@ end
             Δ = max(Δ, abs(v-V[energy+1])/(v==0 ? 1 : v))
         end
         
-        @inbounds v = V[Ec+1]
-        @inbounds V[Ec+1] = 1. + sr*V[Ec+1 - er]
-        Δ = max(Δ, abs(v-V[Ec+1])/(v==0 ? 1 : v))
+        @inbounds V[Ec+1] = 1. 
 
         if Δ < tol 
             break 
         end
     end
-    return V, Δ
+    return V
 end
 
+# Given the optimal value, calculate the optimal policy
+# For each energy level, check the expected returns of each action,
+# and pick the one with the highest expected return 
+# Output: optimal policy - vector of length Ec+1, storing the optimal action for energy level 0, ..., Ec.
+# The actions are represented by integers- 1: indiscriminate attack, 2: risk-prone attack, 3: risk-averse attack  
 @everywhere function policy_from_optimal_value(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s)
     policy = zeros(Int, Ec-1)
     actions = [2;3;1]
@@ -89,32 +116,48 @@ end
     return policy
 end
 
+# Calculates the compressed probability matrix for the action and outcome, given parameters. 
+# The rows represent the actions taken and the columns, the outcomes.
+# Row1: indiscriminate attack, Row2: risk-prone attack, Row3: risk-averse attack
+# The outcomes are represented as follows:
+#[ Obtain safe prey, obtain dangerous prey, get injured ;
+#  Metabolic loss,   obtain dangerous prey, get injured ;
+#  Obtain safe prey, metabolic loss,           ---       ]
 @everywhere function prob(ρ, ϕ)
     [ 1-ρ  ρ*ϕ  ρ*(1-ϕ) ;
       1-ρ  ρ*ϕ  ρ*(1-ϕ) ;
       1-ρ  ρ    0        ]
 end
 
-@everywhere function energy(m, Es, Ed, Ei)
-    [ Es   Ed   -Ei ;
-      -m   Ed   -Ei ;
-      Es   -m   0    ]
-end
-
+# Sets the constant compressed matrix for the signs of energy changes 
+# for action and outcome, given parameters. 
+# The format is the same as the probability matrix above.
 @everywhere const e_signs = Val.([ :positive   :positive   :negative ;
                                    :negative   :positive   :negative ;
                                    :positive   :negative   :positive  ])
 
+# Sets the compressed transition time matrix 
+# for action and outcome, given parameters. 
+# The format is the same as the probability matrix above.
 @everywhere function jump_time(hs, hd, hi)
     [ hs + 1   hd + 1   hi + 1 ;
       1        hd + 1   hi + 1 ;
       hs + 1   1        1       ]
 end
 
+# Calculates the compressed survival probability matrix 
+# for action and outcome, given parameters. 
+# The format is the same as the probability matrix above.
 @everywhere function surv(d, hs, hd, hi) 
     surv_prob.(d,jump_time(hs, hd, hi))
 end
 
+# Sets the compressed matrix of energy distributions for the different 
+# actions and outcomes. The distributions show what are the possible 
+# energy changes for each given outcome, with a given mean and variance.
+# The distributions are discretised normal distributions that are 
+# truncated at 0.
+# The format is the same as the probability matrix abo
 @everywhere function distributions(m, Δm, Es, ΔEs, Ed, ΔEd, Ei, ΔEi)
     ds = (ΔEs*Es > 0) ? DiscreteNormal(Es, ΔEs*Es) : Dirac(Es)
     dd = (ΔEd*Ed > 0) ? DiscreteNormal(Ed, ΔEd*Ed) : Dirac(Ed)
@@ -125,15 +168,23 @@ end
       ds   dm   Dirac(0)  ]
 end
 
+# Calculates the probability distribution functions for all 
+# required energy values from the distribution matrix calculated above
 @everywhere function distribution_pdfs(dists, Ec)
     pdf.(dists, (0:Ec,))
 end
 
+# Calculates the complementary cumulative distribution functions for all 
+# required energy values from the distribution matrix calculated above
+# This is required in order to calculated expected values for all cases when 
+# energy obtained would increase the energy to Ec or decrease it to 0
 @everywhere function distribution_ccdfs(dists, Ec)
     ccdf.(dists, (0:Ec,))
 end
 
-@everywhere function calc_value_policy(Ec, ρ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, ϕ, Ei, ΔEi, hi, er, sr; tol = 1e-6, maxiter = 10_000)
+# Calculates the optimal value and policy functions given the parameter values of the environment
+# Calculates the transition probability matrices and passes this to the main value iteration function.
+@everywhere function calc_value_policy(Ec, ρ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, ϕ, Ei, ΔEi, hi; tol = 1e-6, maxiter = 10_000)
     # transition probabilities
     p = prob(ρ, ϕ)
     dists = distributions(m, Δm, Es, ΔEs, Ed, ΔEd, Ei, ΔEi)
@@ -144,14 +195,18 @@ end
     V = zeros(Float64, Ec + 1)
     V[end] = 1.
 
-    V, err = value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = tol, maxiter = maxiter)
+    V = value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = tol, maxiter = maxiter)
     policy = policy_from_optimal_value(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s)
-    return V, err, policy
+    return V, policy
 end
 
+# Calculates the optimal policy for a grid of parameter values 
+# Is parallelized to improve performance
 grid_solver(pars_iterable; tol = 1e-6, maxiter = 10_000) =
-    pmap(x->calc_value_policy(x...; tol = tol, maxiter = maxiter)[3], pars_iterable)
+    pmap(x->calc_value_policy(x...; tol = tol, maxiter = maxiter)[2], pars_iterable)
 
+# Calculates the composition of a given policy. Composition is the fraction
+# of energy levels that the action is indiscriminate attack, risk-prone attack and risk-averse attack
 function policy_to_composition(policy)
     L = length(policy)
     B = sum(policy .== 1) / L
@@ -159,6 +214,10 @@ function policy_to_composition(policy)
     (B,D)
 end
 
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
 color_a = colorant"tomato" #"#ff4e00" #"#FF8C00"                     #dangerous
 color_b = colorant"#50f4d5ff" #"#00FF8C"         #both
 color_c = colorant"mediumpurple1"  #"#8C00FF"   #safe
@@ -185,7 +244,10 @@ theme = Theme(
 )
 set_theme!(theme)
 
-## calculations
+## ------------------------------------------------------------------------------
+# Choosing the parameters for the calculations
+# To reduce the computation time, one can reduce the number of points of ρ and ϕ
+# -------------------------------------------------------------------------------
 
 ρ = 0.001:0.001:0.999
 d = 0.1
@@ -206,12 +268,21 @@ m = 1
 er = 1
 sr = 0.
 
+## ------------------------------------------------------------------------------
+# Performing the calculations for the central heatmap
+# ------------------------------------------------------------------------------
+
 pars_vec = [Ec, ρ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, ϕ, Ei, ΔEi, hi, er, sr]
 
 pars_iterable = collect(product(pars_vec...))
 policy_grid = grid_solver(pars_iterable; tol = 1e-6, maxiter = 1_000)
 policy_composition_grid = policy_to_composition.(policy_grid)
 policy_color_grid = splat(color_itp).(policy_composition_grid)
+
+
+## ------------------------------------------------------------------------------
+# Performing the calculations for the surrounding policies
+# ------------------------------------------------------------------------------
 
 calc_value_policy(point::Tuple{<:Real, <:Real}) = calc_value_policy(Ec, point[1], d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, point[2], Ei, ΔEi, hi, er, sr; tol = 1e-12, maxiter = 10_000)[3]
 
@@ -222,7 +293,11 @@ pointd = (0.75, 0.75)
 
 policya, policyb, policyc, policyd = calc_value_policy.((pointa, pointb, pointc, pointd))
 
-## FIGURE
+## ------------------------------------------------------------------------------
+# Plotting the figure step by step
+# ------------------------------------------------------------------------------
+
+## Create the figure and its internal layout
 fig = Figure(size = (1300, 500))
 
 ga = fig[1:3, 1] = GridLayout()
@@ -230,7 +305,7 @@ gb = fig[1:3, 2:4] = GridLayout()
 gc = fig[1:3, 5] = GridLayout()
 gd = fig[1:3, 6] = GridLayout()
 
-## example policies 
+## Create the axes for plotting the example policies
 xlabel = "Energy"
 yticks = ([1,2,3],["Generalize", "Specialize\non\nDangerous", "Specialize\non\nSafe"])
 yreversed = true
@@ -243,16 +318,16 @@ axb = Axis(ga[2, 1]; xlabel, yticks, yreversed, yticklabelsize)
 axc = Axis(gd[1, 1]; yticks, yreversed, width, yticklabelsize, yaxisposition) 
 axd = Axis(gd[2, 1]; xlabel, yticks, yreversed, width, yticklabelsize, yaxisposition) 
 
+# plotting the example policies
 scatter!.((axa, axb, axc, axd), (policya, policyb, policyc, policyd); markersize = 10)
 
 limits!.((axa, axb, axc, axd), -1, Ec+1, 3.25, 0.75)
 
-## central heatmap
-ax1 = Axis(gb[1, 1]; ylabel = "Hunting ability ϕ", xlabel = "Dangerous prey abundance ρ", aspect = DataAspect())
+## plotting the central heatmap
+ax1 = Axis(gb[1, 1]; ylabel = "Hunting ability ϕ", xlabel = "Dangerous prey availability ρ", aspect = DataAspect())
 hm = heatmap!(ax1, ρ, ϕ, policy_color_grid; rasterize = 2)
 
-## legend for heatmap 
-
+## Creating the ternary colormap legend for heatmap 
 function ternary_to_cartesian(a, b)
     c = 1 - a - b
     x = 0.5 * (2b + c) / (a + b + c)
@@ -323,6 +398,7 @@ function shrink_distance(anchor, moving, shrinkby)
     return shifted_point
 end
 
+# drawing the lines from the points on the heatmap to the example policies
 pointa, pointb, pointc, pointd = Point2f.((pointa, pointb, pointc, pointd))
 pointa_fig, pointb_fig, pointc_fig, pointd_fig = Makie.shift_project.(ax1.scene, (pointa, pointb, pointc, pointd))
 anchora = Point2f(22, 2)
@@ -371,5 +447,8 @@ scatter!(fig.scene, pointc_fig; color = :transparent, strokecolor = :black, stro
 
 display(fig)
 
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 save("Figure_2.pdf", fig)
 

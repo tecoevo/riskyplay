@@ -1,4 +1,19 @@
-# load packages and setup
+# -------------------------------------------------------------------------------------------------------
+# This script loads data calculated using "adult_environment_optimal_performance.jl" and 
+# "protected_environment_learning_simulations.jl" to plot heatmap of the different qualitative
+# benefits of a protected juvenile environment for different parameters of the environment
+# and juvenile protection levels
+#
+# Data from "protected_environment_learning_simulations.jl" provides the adult performance for 
+# short and long juvenile phases and the re-learning times.
+# Data from "adult_environment_optimal_performance.jl" provides the optimal performance in a given 
+# environment to normalise the adult performance.
+# -------------------------------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------
+# Load packages 
+# ------------------------------------------------------------
 using DataFrames
 using DataFramesMeta
 using Arrow
@@ -9,7 +24,10 @@ using LsqFit
 using Measurements
 using Measurements: value, uncertainty
 
-# plotting theme
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -33,6 +51,19 @@ theme = Theme(
 )
 set_theme!(theme)
 
+# functions for plotting with measurement values
+function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
+    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
+end
+
+function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
+    value.(x)
+end
+
+# ------------------------------------------------------------
+# Load data 
+# ------------------------------------------------------------
+
 load_data(name::String) = open(name, "r") do file 
     copy(DataFrame(Arrow.Table(file))) 
 end
@@ -45,20 +76,15 @@ ArrowTypes.toarrow(m::Measurement{T}) where {T} = (m.val, m.err)
 ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
-
-# functions for plotting with measurement values
-function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
-    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
-end
-
-function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
-    value.(x)
-end
-
 Base.typemin(::Type{Measurement{T}}) where {T <: AbstractFloat} = typemin(T) ± zero(T)
 
 # load the dataset
-df = load_data("../Datasets/protected_environment_learning.arrow")
+df = load_data("protected_environment_learning.arrow")
+
+# ------------------------------------------------------------
+# Fitting the exponential decay and, calculating the
+# relative learning speeds and other metrics
+# ------------------------------------------------------------
 
 # functions for fitting exponential decay
 model_exp_decay(x, p) = exp.(-p[1]*x)
@@ -78,7 +104,7 @@ end
 function relative_learning_speeds(df)
     df_learning_speeds = @chain df begin
         @groupby(:ρ, :ϕ, :Ei_juvenile)
-        @combine(:decay_rate = fit_exponential_decay(:developmental_time, :relearning_time_steps))
+        @combine(:decay_rate = fit_exponential_decay(:developmental_time, :relearning_time))
         sort(:Ei_juvenile, rev = true)
         @groupby(:ρ, :ϕ)
         @transform(:decay_rate_reference = :decay_rate[1])
@@ -132,6 +158,9 @@ end
 df_all = innerjoin(df_relative_learning_speeds, df_relative_asymptotic_performance, df_relative_early_performance; on = [:ρ, :ϕ, :Ei_juvenile], makeunique = true)
 df_all = @rtransform(df_all, :safe_environment_benefit = compare_three(:relative_early_adult_performance, :relative_asymptotic_adult_performance, :relative_learning_speed; lthres = 0.02, mthres = -0.01, rthres = 0.00))
 
+# ------------------------------------------------------------
+# Plot the calculated metrics
+# ------------------------------------------------------------
 
 colorrange = (0, 7)
 colormap = cgrad(:jet, 8, categorical = true)
@@ -148,7 +177,7 @@ hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.safe_environment_benefit; colormap, color
 
 Ei_juvenile = 2
 df3 = @rsubset(df_all, :Ei_juvenile == Ei_juvenile)
-ax2 = Axis(fig[1,2];  xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic), offset = (15, 0)), xticks, aspect)
+ax2 = Axis(fig[1,2];  xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, aspect)
 hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.safe_environment_benefit; colormap, colorrange)
 
 Ei_juvenile = 1
@@ -176,4 +205,7 @@ arrows!(topax.parent.scene, points, directions)
 
 display(fig)
 
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 save("Figure_7.pdf", fig)

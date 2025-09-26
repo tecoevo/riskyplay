@@ -1,4 +1,4 @@
-### This repository contains the simulation code, datasets and plotting code for the article "Optimising play for learning risky behaviour"
+### This repository contains the simulation code, datasets and plotting code for the article "Optimising play for learning risky behaviour" by Dharanish Rajendra & Chaitanya S. Gokhale.
 
 ## Overview
 
@@ -40,15 +40,18 @@ This generates the dataset file `adult_environment_optimal_performance.arrow`.
 This dataset is required to run the next simulation code. 
 Run this before the next file.
 2. `protected_environment_learning_simulations.jl` performs the two-stage learning simulation and calculates the relevant metrics of adult performance and adult relearning time for a range of environmental parameter values and developmental times. 
+Reinforcement learning is used to perform learning and Dynamic programming is used for calculation of optimal policy, optimal reward and learning times.
 This generates the dataset file `protected_environment_learning.arrow` which is required for creating Figures 3 – 7, A2 and A3.
 3. `optimality_of_RL.jl` calculates the optimal policy which a reinforcement agent converges to and the time (in number of steps) taken to converge to the optimal policy for a range of ρ and ϕ values. 
+Reinforcement learning is used. 
+Dynamic programming is used to calculate the optimal policy and check whether the learning process has finished and to stop it.
 This generates the dataset `optimality_of_RL.arrow` which is required to create Figure A1. 
 4. `RLUtilities.jl` contains common Reinforcement Learning code used by all the other simulation scripts.
 
-Each of these codes are very computationally expensive and were run on a High Performance Computing Cluster with hundreds of CPU cores running for several days. The codes can be run as-is on a cluster managed by SLURM and will scale to any resource configuration (multiple cores on a single node or distributed across nodes). 
+All of these codes are very computationally expensive and were run on a High Performance Computing Cluster with hundreds of CPU cores for several days. The codes can be run as-is on a cluster managed by SLURM and will scale to any resource configuration. 
 To run on a personal computer and have it finish in a reasonable amount of time, the parameters of the simulations (within each script file) can be modified in the following ways.
 - Reduce the number of experiments for each parameter combination by modifying the variable `number_experiments`
-- Reduce the number of parameters of `ρ` and `ϕ`, by changing the step length. That is, instead of `ρ=0.01:0.01:0.99`, having `ρ=0.1:0.1:0.9` will reduce the number of parameters by a factor of 10 and make the figure more blocky.
+- Reduce the number of points of parameters `ρ` and `ϕ`, by changing the step length. That is, instead of `ρ=0.01:0.01:0.99`, having `ρ=0.1:0.1:0.9` will reduce the number of parameters by a factor of 10 and make the figure more blocky.
 - Reduce the number of values of `developmental_time` in `protected_environment_learning_simulations.jl`
 
 Upon running any code, it will display / output a dynamic progress bar which will give an estimate of how much time is remaining.
@@ -63,7 +66,7 @@ To create the figures, first start a Julia REPL as above and run the following: 
 Here `<number>` is to be replaced by the number of the Figure required (except Figure 1).
 
 - Figure_1.svg is the editable vector graphics file that was used to create Figure 1, the illustration of the model.
-- Figure_2.jl performs dynamic programming calculations to determine the optimal policy for a range of parameter values. No dataset is required for this file.
+- Figure_2.jl performs dynamic programming calculations to determine the optimal policy for a range of parameter values. No dataset is required for this file. It might take a few minutes to finish running. Consider reducing the number of points of parameters `ρ` and `ϕ` for faster run times.
 - Figure_3.jl – Figure_7.jl, Figure_A2.jl and Figure_A3.jl use the dataset `protected_environment_learning.arrow`
 - Figure_A1.jl uses the dataset `optimality_of_RL.arrow`.
 

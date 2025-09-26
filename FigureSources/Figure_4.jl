@@ -1,4 +1,19 @@
-# load packages and setup
+# -------------------------------------------------------------------------------------------------------
+# This script loads data calculated using "adult_environment_optimal_performance.jl" and 
+# "protected_environment_learning_simulations.jl" to plot heatmap of relative adult performance
+# after an extended and short juvenile phase, for different environmental parameters and Protection
+# levels of the juvenile phase and saves it to disk.
+#
+# Data from "protected_environment_learning_simulations.jl" provides the adult performance for 
+# short and long juvenile phases.
+# Data from "adult_environment_optimal_performance.jl" provides the optimal performance in a given 
+# environment to normalise the adult performance.
+# -------------------------------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------
+# Load packages 
+# ------------------------------------------------------------
 using DataFrames
 using DataFramesMeta
 using Arrow
@@ -7,7 +22,12 @@ using Chain
 using Measurements
 using Measurements: value, uncertainty
 
-# plotting theme
+
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
+
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -31,6 +51,18 @@ theme = Theme(
 )
 set_theme!(theme)
 
+# functions for plotting with measurement values
+function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
+    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
+end
+function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
+    value.(x)
+end
+
+# ------------------------------------------------------------
+# Load data 
+# ------------------------------------------------------------
+
 load_data(name::String) = open(name, "r") do file 
     copy(DataFrame(Arrow.Table(file))) 
 end
@@ -43,19 +75,10 @@ ArrowTypes.toarrow(m::Measurement{T}) where {T} = (m.val, m.err)
 ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
-
-# functions for plotting with measurement values
-function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
-    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
-end
-function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
-    value.(x)
-end
-
 Base.typemin(::Type{Measurement{T}}) where {T <: AbstractFloat} = typemin(T) ± zero(T)
 
 # load the dataset
-df = load_data("../Datasets/protected_environment_learning.arrow")
+df = load_data("protected_environment_learning.arrow")
 
 # maximum reward post juvenile stage
 df_max_reward = @chain df begin
@@ -67,12 +90,18 @@ df_max_reward = @chain df begin
     @rsubset(:Ei_juvenile != 4)
 end
 
+# ------------------------------------------------------------
+# Plot the data
+# ------------------------------------------------------------
+
 fig = Figure(size = (1200, 710))
 colorrange = (-0.5, 0.5)
 colormap = :seismic
 xticks = 0.2:0.2:0.8
 yticks = 0.2:0.2:0.8
 aspect = DataAspect()
+
+# Relative adult performance for extended juvenile phase
 
 Ei_juvenile = 3
 df3 = @rsubset(df_max_reward, :Ei_juvenile == Ei_juvenile)
@@ -81,7 +110,7 @@ hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.relative_asymptotic_adult_performance; co
 
 Ei_juvenile = 2
 df3 = @rsubset(df_max_reward, :Ei_juvenile == Ei_juvenile)
-ax2 = Axis(fig[1,2]; xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic), offset = (15, 0)), xticks, xlabelpadding = 0, aspect)
+ax2 = Axis(fig[1,2]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, xlabelpadding = 0, aspect)
 hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.relative_asymptotic_adult_performance; colormap, colorrange)
 
 Ei_juvenile = 1
@@ -104,7 +133,7 @@ points = lift(px -> [px], @lift($(topax.xaxis.attributes.endpoints)[2]))
 directions = [Vec2f(1, 0)]
 arrows!(topax.parent.scene, points, directions)
 
-# reward post short  juvenile stage
+# Relative adult performance for short juvenile phase
 
 function subset_scaled_developmental_time(df, value)
     @chain df begin
@@ -126,7 +155,7 @@ hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.relative_adult_performance; colormap, col
 
 Ei_dev = 2
 df3 = @rsubset(df_early_reward, :Ei_juvenile == Ei_juvenile)
-ax2 = Axis(fig[2,2]; xlabel = rich("Dangerous prey abundance ", rich("ρ", font = :italic), offset = (15, 0)), xticks, xlabelpadding = 0, aspect)
+ax2 = Axis(fig[2,2]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, xlabelpadding = 0, aspect)
 hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.relative_adult_performance; colormap, colorrange)
 
 Ei_dev = 1
@@ -148,5 +177,8 @@ rowgap!(fig.layout, 5)
 
 display(fig)
 
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 save("Figure_4.pdf", fig)
 

@@ -1,4 +1,18 @@
-# load packages and setup
+# -------------------------------------------------------------------------------------------------------
+# This script loads data calculated using "adult_environment_optimal_performance.jl" and 
+# "protected_environment_learning_simulations.jl" to plot examples of the effects of a
+#  protected environment for learning on normalised adult performance and save to disk.
+#
+# Data from "protected_environment_learning_simulations.jl" provides the adult performance for 
+# different developmental times.
+# Data from "adult_environment_optimal_performance.jl" provides the optimal performance in a given 
+# environment to normalise the adult performance
+# -------------------------------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------
+# Load packages 
+# ------------------------------------------------------------
 using DataFrames
 using DataFramesMeta
 using Arrow
@@ -7,7 +21,10 @@ using Chain
 using Measurements
 using Measurements: value, uncertainty
 
-# plotting theme
+## ------------------------------------------------------------------------------
+# Setting up the theme for plotting using CairoMakie.jl
+# Colors, fonts, sizes, etc.
+# ------------------------------------------------------------------------------
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -31,6 +48,18 @@ theme = Theme(
 )
 set_theme!(theme)
 
+# functions for plotting with measurement values
+function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
+    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
+end
+function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
+    value.(x)
+end
+
+# ------------------------------------------------------------
+# Load data 
+# ------------------------------------------------------------
+
 load_data(name::String) = open(name, "r") do file 
     copy(DataFrame(Arrow.Table(file))) 
 end
@@ -44,23 +73,19 @@ ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
 
-# functions for plotting with measurement values
-function Makie.convert_arguments(T2::Type{<: Band}, x::AbstractArray, y::AbstractArray{Measurement{T}}) where {T} 
-    Makie.convert_arguments(T2, value.(x), value.(y) .- uncertainty.(y), value.(y) .+ uncertainty.(y))
-end
-function Makie.convert_single_argument(x::AbstractArray{Measurement{T}}) where {T}
-    value.(x)
-end
-
 # representative examples of performance curves
 
-df = load_data("../Datasets/protected_environment_learning.arrow")
+df = load_data("protected_environment_learning.arrow")
 df_dang = @rsubset(df, :ρ == 0.9, :ϕ == 0.6, :Ei_juvenile == 4)
 df_safe = @rsubset(df, :ρ == 0.9, :ϕ == 0.6, :Ei_juvenile == 0)
 df_safe_2 = @rsubset(df, :ρ == 0.5, :ϕ == 0.2, :Ei_juvenile == 0, :scaled_developmental_time <= 2.1)
 sort!(df_dang, :scaled_developmental_time)
 sort!(df_safe, :scaled_developmental_time)
 sort!(df_safe_2, :scaled_developmental_time)
+
+# ------------------------------------------------------------
+# Plot the data
+# ------------------------------------------------------------
 
 ylims = (0, 1.1)
 xlims = (0, nothing)
@@ -113,4 +138,7 @@ text!.((ax1, ax2, ax3), 2.05, 0.02; text = "(i)", align = (:right, :bottom), fon
         
 display(fig)
 
+# ------------------------------------------------------------
+# Save the figure to disk
+# ------------------------------------------------------------
 save("Figure_3.pdf", fig)

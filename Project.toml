@@ -25,6 +25,7 @@ ReinforcementLearningTrajectories = "6486599b-a3cd-4e92-a99a-2cea90cc8c3c"
 SlurmClusterManager = "c82cd089-7bf7-41d7-976b-6b5d413cbe0a"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TernaryDiagrams = "54198458-1476-45ac-9e44-88a4201bfea6"
+TimeZones = "f269a46b-ccf7-5d73-abea-4c690281aa53"
 
 [compat]
 julia = "1.10.2"
