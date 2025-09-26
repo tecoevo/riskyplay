@@ -1,4 +1,4 @@
-### This repository contains the simulation code, datasets and plotting code for the article "Optimising play for learning risky behaviour" by Dharanish Rajendra & Chaitanya S. Gokhale.
+### This repository contains the simulation code, datasets and plotting code for the article "Optimising play for learning risky behaviour"
 
 ## Overview
 
