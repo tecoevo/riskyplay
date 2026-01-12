@@ -1,12 +1,12 @@
 # -------------------------------------------------------------------------------------------------------
 # This script loads data calculated using "protected_environment_learning_simulations.jl" 
-# to plot examples of the effects of a protected environment for learning on relative learning speed
-# for different environment parameters and protection level of juvenile phase.
+# to plot examples of the effects of a protected environment for learning on relative re-learning time
+# for a range of scaled developmental times and different environment parameters 
+# and protection level of juvenile phase.
 #
 # Data from "protected_environment_learning_simulations.jl" provides the re-learning time
 # for different enviromental parameters, protection level and developmental times
 # -------------------------------------------------------------------------------------------------------
-
 
 # ------------------------------------------------------------
 # Load packages 
@@ -16,16 +16,13 @@ using DataFramesMeta
 using Arrow
 using CairoMakie
 using Chain
-using LsqFit
 using Measurements
 using Measurements: value, uncertainty
-
 
 ## ------------------------------------------------------------------------------
 # Setting up the theme for plotting using CairoMakie.jl
 # Colors, fonts, sizes, etc.
 # ------------------------------------------------------------------------------
-# plotting theme
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -75,96 +72,81 @@ ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
 Base.typemin(::Type{Measurement{T}}) where {T <: AbstractFloat} = typemin(T) ± zero(T)
 
+function subset_scaled_developmental_time(df, value)
+    @chain df begin
+        @rtransform(:difference = abs(:scaled_developmental_time - value))
+        sort(:difference)
+        @rsubset(:difference <= 0.1)
+        @groupby(:ρ, :ϕ, :Ei_juvenile)
+        combine(first, _)
+        @select(Not([:difference]))
+    end
+end
+
 # load the dataset
 df = load_data("protected_environment_learning.arrow")
 
 # ------------------------------------------------------------
-# Fitting the exponential decay and 
-# calculating the relative learning speeds
+# Plot the data automatically in a loop for 
+# all the rows and columns
 # ------------------------------------------------------------
 
-# functions for fitting exponential decay
-model_exp_decay(x, p) = exp.(-p[1]*x)
-
-function fit_exponential_decay(x, y::AbstractVector{<:Measurement})
-    # x_new = value.(x)
-    x_new = x
-    x_max = maximum(x_new)
-    y_max = maximum(y)
-    x_norm = x_new ./ x_max
-    y_norm = y ./ y_max
-    fit = curve_fit(model_exp_decay, x_norm, y_norm, [1. ± 0.])
-    p = fit.param[1]/x_max
-    return p
-end
-
-function relative_learning_speeds(df; weighted = true)
-    df_learning_speeds = @chain df begin
-        @groupby(:ρ, :ϕ, :Ei_juvenile)
-        @combine(:decay_rate = fit_exponential_decay(:developmental_time, :relearning_time))
-        sort(:Ei_juvenile, rev = true)
-        @groupby(:ρ, :ϕ)
-        @transform(:decay_rate_reference = :decay_rate[1])
-        @rtransform(:relative_decay_rate = :decay_rate ./ :decay_rate_reference)
-        @rtransform(:relative_decay_rate_log = log10(:relative_decay_rate))
+# learning time curves for all parameter values
+Eis = 3:-1:0
+scaled_developmental_times = 0.1:0.1:1.0
+fig = Figure(size = (2500, 1000))
+for (j, dev_time) in enumerate(scaled_developmental_times)
+    df2 = subset_scaled_developmental_time(df, dev_time)
+    for (i, Ei) in enumerate(Eis)
+        df3 = @rsubset(df2, :Ei_juvenile == Ei)
+        ax = Axis(fig[i,j]; xlabelpadding = 10, xticklabelpad = -2, yaxisposition = :right, xaxisposition = :top, ylabelpadding = 10, yticklabelpad = 3, xticks = 0.2:0.2:0.8, yticks = 0.2:0.2:0.8, xlabelsize = 25, ylabelsize = 25, xticklabelsize = 20, yticklabelsize = 20)
+        Ei == 3 && j == 5 && (ax.xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (9, 0)))
+        j == 10 && Ei == 1 && (ax.ylabel = rich("Capture probability ", rich("ϕ", font = :italic), offset = (8, 0)))
+        Ei != first(Eis)  && hidexdecorations!(ax)
+        dev_time != last(scaled_developmental_times) && hideydecorations!(ax)
+        global hm = heatmap!(ax, df3.ρ, df3.ϕ, df3.relative_relearning_time, colormap = :seismic, colorrange = (-0.5, 0.5))
     end
-
-    return df_learning_speeds
 end
 
-df2 = @chain df begin
-    @rsubset(:scaled_developmental_time <= 1.0)
-    relative_learning_speeds()
-end 
+# add the colorbar for legend
+num_plots_x = length(scaled_developmental_times)
+Colorbar(fig[:, num_plots_x+1], hm, label = "Difference in relearning time", labelsize = 26, ticklabelsize = 21, width = 20)
 
 # ------------------------------------------------------------
-# Plot the calculated metrics
+# Add the overarching left and bottom axes
 # ------------------------------------------------------------
+length_of_axis = 10
+length_of_plot = length_of_axis / num_plots_x
+ticks_positions_x = (length_of_plot/2):length_of_plot:(10-length_of_plot/2)
 
-fig = Figure(size = (1200, 390))
-colorrange = (-0.5, 0.5)
-colormap = :seismic
-xticks = 0.2:0.2:0.8
-yticks = 0.2:0.2:0.8
-aspect = DataAspect()
+leftax = Axis(fig[1:4, 0], width = 0, ylabel = rich("Protection level of juvenile environment ", rich("ψ", font = :italic)), yticks = ([1, 3, 5, 7], string.([4, 3, 2, 1])), ylabelsize = 40, yticklabelsize = 26, yticklabelpad = 5, spinewidth = 2, ytickwidth = 2)
+ylims!(leftax, 0, 8)
+hidespines!(leftax, :t, :r, :b)
+hidedecorations!(leftax, ticks = false, ticklabels = false, label = false)
+hidexdecorations!(leftax)
 
-Ei_juvenile = 3
-df3 = @rsubset(df2, :Ei_juvenile == Ei_juvenile)
-ax1 = Axis(fig[1,1]; ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks, yticks, aspect, xticklabelpad = 0)
-hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.relative_decay_rate_log; colormap, colorrange)
+bottomax = Axis(fig[5, 1:num_plots_x], height = 0, xlabel = "Scaled developmental time", xticks = (ticks_positions_x, string.(scaled_developmental_times)), xlabelsize = 40, xticklabelsize = 26, spinewidth = 2, xtickwidth = 2)
+hidespines!(bottomax, :t, :r, :l)
+hidedecorations!(bottomax, ticks = false, ticklabels = false, label = false)
+hideydecorations!(bottomax)
 
-Ei_juvenile = 2
-df3 = @rsubset(df2, :Ei_juvenile == Ei_juvenile)
-ax2 = Axis(fig[1,2]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, aspect, xlabelpadding = 0)
-hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.relative_decay_rate_log; colormap, colorrange)
-
-Ei_juvenile = 1
-df3 = @rsubset(df2, :Ei_juvenile == Ei_juvenile)
-ax3 = Axis(fig[1,3]; xticks, aspect)
-hm = heatmap!(ax3, df3.ρ, df3.ϕ, df3.relative_decay_rate_log; colormap, colorrange)
-
-Ei_juvenile = 0
-df3 = @rsubset(df2, :Ei_juvenile == Ei_juvenile)
-ax4 = Axis(fig[1,4]; xticks, aspect)
-hm = heatmap!(ax4, df3.ρ, df3.ϕ, df3.relative_decay_rate_log; colormap, colorrange)
-Colorbar(fig[1,5], hm, label = "Relative learning speed", labelsize = 21, ticklabelsize = 18)
-
-topax = Axis(fig[0, 1:4], height = 0, xlabel = "Protection level of juvenile environment", xticks = ([1.215, 3.74, 6.27, 8.79], string.([1, 2, 3, 4])), xaxisposition = :top, xlabelpadding = -5, xticklabelpad = 0)
-hideydecorations!(topax)
-
-hideydecorations!.((ax2, ax3, ax4), grid = false, minorgrid = false)
-rowsize!(fig.layout, 1, Aspect(1, 1))
 colgap!(fig.layout, 10)
 rowgap!(fig.layout, 10)
+rowgap!(fig.layout, 4, 15)
+colgap!(fig.layout, 1, 15)
+colgap!(fig.layout, 11, 20)
 
-points = lift(px -> [px], @lift($(topax.xaxis.attributes.endpoints)[2]))
+points = lift(px -> [px], @lift($(leftax.xaxis.attributes.endpoints)[1]))
+directions = [Vec2f(0, -1)]
+arrows!(leftax.parent.scene, points, directions; arrowsize = 15)
+
+points = lift(px -> [px], @lift($(bottomax.xaxis.attributes.endpoints)[2]))
 directions = [Vec2f(1, 0)]
-arrows!(topax.parent.scene, points, directions)
+arrows!(leftax.parent.scene, points, directions; arrowsize = 15)
 
 display(fig)
-
 
 # ------------------------------------------------------------
 # Save the figure to disk
 # ------------------------------------------------------------
-save("Figure_6.pdf", fig)
+save("Figure_ESM5.pdf", fig)

@@ -1,4 +1,25 @@
-### This repository contains the simulation code, datasets and plotting code for the article "Optimising play for learning risky behaviour"
+## This repository contains the simulation code, datasets and plotting code for the article "Optimising play for learning risky behaviour"
+
+#### Authors: 
+**Dharanish Rajendra and Chaitanya S. Gokhale**,
+
+Chair for Computational and Theoretical Biology, Julius-Maximilians-Universität
+Würzburg, Würzburg, Germany
+
+*Corresponding author*: [chaitanya.gokhale@uni-wuerzburg.de](mailto:chaitanya.gokhale@uni-wuerzburg.de)
+
+#### Abstract:
+Animals adapt their behaviour to current environmental conditions to enhance survival and reproductive success. 
+While long-term adaptation occurs through evolutionary processes acting on heritable variation, individuals can also adapt within their lifetime via learning. 
+Learning is particularly advantageous in environments that are uncertain or fluctuate across a lifespan or a few generations. 
+However, reliance on individual learning entails a critical risk: juveniles may begin life poorly adapted, requiring costly and hazardous exploration, especially for species hunting dangerous prey. 
+We explore how early-life learning in protected environments, such as those buffered by parental care, can facilitate behavioural adaptation in riskier adult contexts. 
+Using reinforcement learning, grounded in dopaminergic reward circuits, we model decision-making in a predator hunting both safe and dangerous prey. 
+Our results show that juvenile experiences can generalise to distinct adult environments when sufficient structural similarity exists between them. 
+This framework helps explain phenomena such as meerkats provisioning disabled prey for pups and the benefits of extended human childhood. 
+Our findings demonstrate that structured play or safe exploration in early life can significantly enhance learning-based adaptation to dangerous environments.
+
+---
 
 ## Overview
 
@@ -41,11 +62,11 @@ This dataset is required to run the next simulation code.
 Run this before the next file.
 2. `protected_environment_learning_simulations.jl` performs the two-stage learning simulation and calculates the relevant metrics of adult performance and adult relearning time for a range of environmental parameter values and developmental times. 
 Reinforcement learning is used to perform learning and Dynamic programming is used for calculation of optimal policy, optimal reward and learning times.
-This generates the dataset file `protected_environment_learning.arrow` which is required for creating Figures 3 – 7, A2 and A3.
+This generates the dataset file `protected_environment_learning.arrow` which is required for creating Figures 3 – 7, ESM2 -  and ESM5.
 3. `optimality_of_RL.jl` calculates the optimal policy which a reinforcement agent converges to and the time (in number of steps) taken to converge to the optimal policy for a range of ρ and ϕ values. 
 Reinforcement learning is used. 
 Dynamic programming is used to calculate the optimal policy and check whether the learning process has finished and to stop it.
-This generates the dataset `optimality_of_RL.arrow` which is required to create Figure A1. 
+This generates the dataset `optimality_of_RL.arrow` which is required to create Figure ESM1. 
 4. `RLUtilities.jl` contains common Reinforcement Learning code used by all the other simulation scripts.
 
 All of these codes are very computationally expensive and were run on a High Performance Computing Cluster with hundreds of CPU cores for several days. The codes can be run as-is on a cluster managed by SLURM and will scale to any resource configuration. 
@@ -67,8 +88,8 @@ Here `<number>` is to be replaced by the number of the Figure required (except F
 
 - Figure_1.svg is the editable vector graphics file that was used to create Figure 1, the illustration of the model.
 - Figure_2.jl performs dynamic programming calculations to determine the optimal policy for a range of parameter values. No dataset is required for this file. It might take a few minutes to finish running. Consider reducing the number of points of parameters `ρ` and `ϕ` for faster run times.
-- Figure_3.jl – Figure_7.jl, Figure_A2.jl and Figure_A3.jl use the dataset `protected_environment_learning.arrow`
-- Figure_A1.jl uses the dataset `optimality_of_RL.arrow`.
+- Figure_3.jl – Figure_5.jl, Figure_ESM2.jl - Figure_ESM5.jl use the dataset `protected_environment_learning.arrow`
+- Figure_ESM1.jl uses the dataset `optimality_of_RL.arrow`.
 
 ## Datasets
 

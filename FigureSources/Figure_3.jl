@@ -1,12 +1,13 @@
 # -------------------------------------------------------------------------------------------------------
 # This script loads data calculated using "adult_environment_optimal_performance.jl" and 
-# "protected_environment_learning_simulations.jl" to plot examples of the effects of a
-#  protected environment for learning on normalised adult performance and save to disk.
+# "protected_environment_learning_simulations.jl" to plot heatmap of relative adult performance
+# after an extended and short juvenile phase, for different environmental parameters and Protection
+# levels of the juvenile phase and saves it to disk.
 #
 # Data from "protected_environment_learning_simulations.jl" provides the adult performance for 
-# different developmental times.
+# short and long juvenile phases.
 # Data from "adult_environment_optimal_performance.jl" provides the optimal performance in a given 
-# environment to normalise the adult performance
+# environment to normalise the adult performance.
 # -------------------------------------------------------------------------------------------------------
 
 
@@ -21,10 +22,12 @@ using Chain
 using Measurements
 using Measurements: value, uncertainty
 
+
 ## ------------------------------------------------------------------------------
 # Setting up the theme for plotting using CairoMakie.jl
 # Colors, fonts, sizes, etc.
 # ------------------------------------------------------------------------------
+
 theme = Theme(
     font = "Poppins Regular" ,
     fonts = (; regular = "Poppins Regular", bold = "Poppins Medium"),
@@ -72,73 +75,110 @@ ArrowTypes.toarrow(m::Measurement{T}) where {T} = (m.val, m.err)
 ArrowTypes.arrowname(::Type{Measurement{T}}) where {T} = NAME
 ArrowTypes.JuliaType(::Val{NAME}, ::Type{Tuple{T, T}}) where {T} = Measurement{T}
 ArrowTypes.fromarrow(::Type{Measurement{T}}, m::Tuple{T, T}) where {T} = measurement(m...)
+Base.typemin(::Type{Measurement{T}}) where {T <: AbstractFloat} = typemin(T) ± zero(T)
 
-# representative examples of performance curves
-
+# load the dataset
 df = load_data("protected_environment_learning.arrow")
-df_dang = @rsubset(df, :ρ == 0.9, :ϕ == 0.6, :Ei_juvenile == 4)
-df_safe = @rsubset(df, :ρ == 0.9, :ϕ == 0.6, :Ei_juvenile == 0)
-df_safe_2 = @rsubset(df, :ρ == 0.5, :ϕ == 0.2, :Ei_juvenile == 0, :scaled_developmental_time <= 2.1)
-sort!(df_dang, :scaled_developmental_time)
-sort!(df_safe, :scaled_developmental_time)
-sort!(df_safe_2, :scaled_developmental_time)
+
+# maximum reward post juvenile stage
+df_max_reward = @chain df begin
+    @groupby(:ρ, :ϕ, :Ei_juvenile)
+    @combine(:asymptotic_adult_performance = maximum(:normalised_adult_performance))
+    sort(:Ei_juvenile; rev = true)
+    @groupby(:ρ, :ϕ)
+    @transform(:relative_asymptotic_adult_performance = :asymptotic_adult_performance .- :asymptotic_adult_performance[1])
+    @rsubset(:Ei_juvenile != 4)
+end
 
 # ------------------------------------------------------------
 # Plot the data
 # ------------------------------------------------------------
 
-ylims = (0, 1.1)
-xlims = (0, nothing)
-yticks = [0, 1]
-xticks = 0:2
-ygridcolor = (:black, 0.7)
-fig = Figure(size = (1200, 440))
+fig = Figure(size = (1200, 710))
+colorrange = (-0.5, 0.5)
+colormap = :seismic
+xticks = 0.2:0.2:0.8
+yticks = 0.2:0.2:0.8
+aspect = DataAspect()
 
-x, y = df_dang.scaled_developmental_time, df_dang.normalised_adult_performance
-ax1 = Axis(fig[1,1]; ylabel = "Adult performance", title = "Dangerous juv. env.", yticks, xticks, ygridcolor, ylabelpadding = 0)
-vlines!(ax1, [0.1, maximum(x)]; color = :black, linewidth = 2)
-lines!(ax1, x, y; label = "Simulations", linewidth = 3, color = :darkorange1)
-band!(ax1, x, y; color = (:darkorange1, 0.3))
-xlims = (-0.1, maximum(x) + 0.1)
-limits!(ax1, xlims..., ylims...)
+# Relative adult performance for extended juvenile phase
 
-x, y = df_safe.scaled_developmental_time, df_safe.normalised_adult_performance
-ax2 = Axis(fig[1,2]; xlabel = "Scaled Developmental Time", title = "Protected juv. env.", yticks, xticks, ygridcolor, xlabelpadding = 0)
-vlines!(ax2, [0.1, maximum(x)]; color = :black, linewidth = 2)
-lines!(ax2, x, y; label = "Simulations", linewidth = 3, color = :magenta4)
-band!(ax2, x, y; color = (:magenta4, 0.3))
-hideydecorations!(ax2; grid = false, minorgrid = false)
-xlims = (-0.1, maximum(x) + 0.1)
-limits!(ax2, xlims..., ylims...)
+Ei_juvenile = 3
+df3 = @rsubset(df_max_reward, :Ei_juvenile == Ei_juvenile)
+ax1 = Axis(fig[1,1]; ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks, yticks, xticklabelpad = 0, aspect, title = "A. After extended juvenile phase", titlealign = :left)
+hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.relative_asymptotic_adult_performance; colormap, colorrange)
 
-x, y = df_safe_2.scaled_developmental_time, df_safe_2.normalised_adult_performance
-ax3 = Axis(fig[1,3]; title = "Protected juv. env. 2", yticks, xticks, ygridcolor)
-vlines!(ax3, [0.1, maximum(x)]; color = :black, linewidth = 2)
-lines!(ax3, x, y; label = "Simulations", linewidth = 3, color = :magenta4)
-band!(ax3, x, y; color = (:magenta4, 0.3))
-hideydecorations!(ax3; grid = false, minorgrid = false)
-xlims = (-0.1, maximum(x) + 0.1)
-limits!(ax3, xlims..., ylims...)
+Ei_juvenile = 2
+df3 = @rsubset(df_max_reward, :Ei_juvenile == Ei_juvenile)
+ax2 = Axis(fig[1,2]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, xlabelpadding = 0, aspect)
+hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.relative_asymptotic_adult_performance; colormap, colorrange)
 
-hidexdecorations!.((ax1, ax2, ax3); label = false, ticklabels = false, ticks = false, minorticks = true)
+Ei_juvenile = 1
+df3 = @rsubset(df_max_reward, :Ei_juvenile== Ei_juvenile)
+ax3 = Axis(fig[1,3]; xticks, aspect)
+hm = heatmap!(ax3, df3.ρ, df3.ϕ, df3.relative_asymptotic_adult_performance; colormap, colorrange)
 
-for (pos, label) in zip(1:3, ["A", "B", "C"])
-    Label(
-        fig[1, pos, TopLeft()], label,
-        fontsize = 21,
-        font = :bold,
-        padding = (0, 0, 0, 0),
-        halign = :right,
-        width = 0 
-    )
+Ei_juvenile = 0
+df3 = @rsubset(df_max_reward, :Ei_juvenile == Ei_juvenile)
+ax4 = Axis(fig[1,4]; xticks, aspect)
+hm = heatmap!(ax4, df3.ρ, df3.ϕ, df3.relative_asymptotic_adult_performance; colormap, colorrange)
+
+topax = Axis(fig[0, 1:4], height = 0, xlabel = rich("Protection level of juvenile environment ", rich("ψ", font = :italic)), xticks = ([1.215, 3.74, 6.27, 8.79], string.([1, 2, 3, 4])), xaxisposition = :top, xlabelpadding = -5, xticklabelpad = 0)
+hideydecorations!(topax)
+
+hideydecorations!.((ax2, ax3, ax4), grid = false, minorgrid = false)
+hidexdecorations!.((ax1, ax2, ax3, ax4); ticks = false)
+
+points = lift(px -> [px], @lift($(topax.xaxis.attributes.endpoints)[2]))
+directions = [Vec2f(1, 0)]
+arrows!(topax.parent.scene, points, directions)
+
+# Relative adult performance for short juvenile phase
+
+function subset_scaled_developmental_time(df, value)
+    @chain df begin
+        @rtransform(:difference = abs(:scaled_developmental_time - value))
+        sort(:difference)
+        @rsubset(:difference <= 0.1)
+        @groupby(:ρ, :ϕ, :Ei_juvenile)
+        combine(first, _)
+        @select(Not([:difference]))
+    end
 end
 
-text!.((ax1, ax2, ax3), 0.15, 0.02; text = "(ii)", align = (:left, :bottom), fontsize = 18)
-text!.((ax1, ax2, ax3), 2.05, 0.02; text = "(i)", align = (:right, :bottom), fontsize = 18)
-        
+df_early_reward = subset_scaled_developmental_time(df, 0.1)
+
+Ei_juvenile = 3
+df3 = @rsubset(df_early_reward, :Ei_juvenile == Ei_juvenile)
+ax1 = Axis(fig[2,1]; ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xticks, yticks, xticklabelpad = -0, aspect, title = "B. After short juvenile phase", titlealign = :left)
+hm = heatmap!(ax1, df3.ρ, df3.ϕ, df3.relative_adult_performance; colormap, colorrange)
+
+Ei_juvenile = 2
+df3 = @rsubset(df_early_reward, :Ei_juvenile == Ei_juvenile)
+ax2 = Axis(fig[2,2]; xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic), offset = (15, 0)), xticks, xlabelpadding = 0, aspect)
+hm = heatmap!(ax2, df3.ρ, df3.ϕ, df3.relative_adult_performance; colormap, colorrange)
+
+Ei_juvenile = 1
+df3 = @rsubset(df_early_reward, :Ei_juvenile == Ei_juvenile)
+ax3 = Axis(fig[2,3]; xticks, aspect)
+hm = heatmap!(ax3, df3.ρ, df3.ϕ, df3.relative_adult_performance; colormap, colorrange)
+
+Ei_juvenile = 0
+df3 = @rsubset(df_early_reward, :Ei_juvenile == Ei_juvenile)
+ax4 = Axis(fig[2,4]; xticks, aspect)
+hm = heatmap!(ax4, df3.ρ, df3.ϕ, df3.relative_adult_performance; colormap, colorrange)
+Colorbar(fig[1:2,5], hm, label = "Relative adult performance", labelsize = 21, ticklabelsize = 18, alignmode = Outside())
+
+hideydecorations!.((ax2, ax3, ax4), grid = false, minorgrid = false)
+rowsize!(fig.layout, 1, Aspect(1, 1))
+rowsize!(fig.layout, 2, Aspect(1, 1))
+colgap!(fig.layout, 10)
+rowgap!(fig.layout, 5)
+
 display(fig)
 
 # ------------------------------------------------------------
 # Save the figure to disk
 # ------------------------------------------------------------
 save("Figure_3.pdf", fig)
+

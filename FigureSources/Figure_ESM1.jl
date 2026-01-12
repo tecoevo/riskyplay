@@ -173,4 +173,4 @@ display(fig)
 # Save the figure to disk
 # ------------------------------------------------------------
 
-save("Figure_A1.pdf", fig)
+save("Figure_ESM1.pdf", fig)

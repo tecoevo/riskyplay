@@ -1,11 +1,13 @@
 # -------------------------------------------------------------------------------------------------------
-# This script loads data calculated using "protected_environment_learning_simulations.jl" 
-# to plot examples of the effects of a protected environment for learning on relative re-learning time
-# for a range of scaled developmental times and different environment parameters 
-# and protection level of juvenile phase.
+# This script loads data calculated using "adult_environment_optimal_performance.jl" and 
+# "protected_environment_learning_simulations.jl" to plot heatmap of relative adult performance
+# after a range of scaled developmental times, for different environmental parameters and Protection
+# levels of the juvenile phase and saves it to disk.
 #
-# Data from "protected_environment_learning_simulations.jl" provides the re-learning time
-# for different enviromental parameters, protection level and developmental times
+# Data from "protected_environment_learning_simulations.jl" provides the adult performance for 
+# short and long juvenile phases.
+# Data from "adult_environment_optimal_performance.jl" provides the optimal performance in a given 
+# environment to normalise the adult performance.
 # -------------------------------------------------------------------------------------------------------
 
 # ------------------------------------------------------------
@@ -91,9 +93,9 @@ df = load_data("protected_environment_learning.arrow")
 # all the rows and columns
 # ------------------------------------------------------------
 
-# learning time curves for all parameter values
+# performance gain over normalized development time for all parameter values
 Eis = 3:-1:0
-scaled_developmental_times = 0.1:0.1:1.0
+scaled_developmental_times = 0.1:0.1:1.
 fig = Figure(size = (2500, 1000))
 for (j, dev_time) in enumerate(scaled_developmental_times)
     df2 = subset_scaled_developmental_time(df, dev_time)
@@ -104,13 +106,13 @@ for (j, dev_time) in enumerate(scaled_developmental_times)
         j == 10 && Ei == 1 && (ax.ylabel = rich("Capture probability ", rich("ϕ", font = :italic), offset = (8, 0)))
         Ei != first(Eis)  && hidexdecorations!(ax)
         dev_time != last(scaled_developmental_times) && hideydecorations!(ax)
-        global hm = heatmap!(ax, df3.ρ, df3.ϕ, df3.relative_relearning_time, colormap = :seismic, colorrange = (-0.5, 0.5))
+        global hm = heatmap!(ax, df3.ρ, df3.ϕ, df3.relative_adult_performance, colormap = :seismic, colorrange = (-0.5, 0.5))
     end
 end
 
 # add the colorbar for legend
 num_plots_x = length(scaled_developmental_times)
-Colorbar(fig[:, num_plots_x+1], hm, label = "Difference in relearning time", labelsize = 26, ticklabelsize = 21, width = 20)
+Colorbar(fig[:, num_plots_x+1], hm, label = "Relative adult performance", labelsize = 30, ticklabelsize = 21, width = 20)
 
 # ------------------------------------------------------------
 # Add the overarching left and bottom axes
@@ -119,7 +121,7 @@ length_of_axis = 10
 length_of_plot = length_of_axis / num_plots_x
 ticks_positions_x = (length_of_plot/2):length_of_plot:(10-length_of_plot/2)
 
-leftax = Axis(fig[1:4, 0], width = 0, ylabel = "Protection level of juvenile environment", yticks = ([1, 3, 5, 7], string.([4, 3, 2, 1])), ylabelsize = 40, yticklabelsize = 26, yticklabelpad = 5, spinewidth = 2, ytickwidth = 2)
+leftax = Axis(fig[1:4, 0], width = 0, ylabel = rich("Protection level of juvenile environment ", rich("ψ", font = :italic)), yticks = ([1, 3, 5, 7], string.([4, 3, 2, 1])), ylabelsize = 40, yticklabelsize = 26, yticklabelpad = 5, spinewidth = 2, ytickwidth = 2)
 ylims!(leftax, 0, 8)
 hidespines!(leftax, :t, :r, :b)
 hidedecorations!(leftax, ticks = false, ticklabels = false, label = false)
@@ -149,4 +151,4 @@ display(fig)
 # ------------------------------------------------------------
 # Save the figure to disk
 # ------------------------------------------------------------
-save("Figure_A3.pdf", fig)
+save("Figure_ESM4.pdf", fig)
