@@ -195,7 +195,7 @@ end
     V = zeros(Float64, Ec + 1)
     V[end] = 1.
 
-    V = value_iteration!(V, Ec, er, sr, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = tol, maxiter = maxiter)
+    V = value_iteration!(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s; tol = tol, maxiter = maxiter)
     policy = policy_from_optimal_value(V, Ec, dist_pdfs, dist_ccdfs, e_signs, p, s)
     return V, policy
 end
@@ -265,14 +265,12 @@ m = 1
 ΔEs = 1.5
 ΔEd = 1.5
 ΔEi = 1.5
-er = 1
-sr = 0.
 
 ## ------------------------------------------------------------------------------
 # Performing the calculations for the central heatmap
 # ------------------------------------------------------------------------------
 
-pars_vec = [Ec, ρ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, ϕ, Ei, ΔEi, hi, er, sr]
+pars_vec = [Ec, ρ, d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, ϕ, Ei, ΔEi, hi]
 
 pars_iterable = collect(product(pars_vec...))
 policy_grid = grid_solver(pars_iterable; tol = 1e-6, maxiter = 1_000)
@@ -284,7 +282,7 @@ policy_color_grid = splat(color_itp).(policy_composition_grid)
 # Performing the calculations for the surrounding policies
 # ------------------------------------------------------------------------------
 
-calc_value_policy(point::Tuple{<:Real, <:Real}) = calc_value_policy(Ec, point[1], d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, point[2], Ei, ΔEi, hi, er, sr; tol = 1e-12, maxiter = 10_000)[3]
+calc_value_policy(point::Tuple{<:Real, <:Real}) = calc_value_policy(Ec, point[1], d, m, Δm, Es, ΔEs, hs, Ed, ΔEd, hd, point[2], Ei, ΔEi, hi; tol = 1e-12, maxiter = 10_000)[2]
 
 pointa = (0.1, 0.8)
 pointb = (0.1, 0.1)
@@ -324,7 +322,7 @@ scatter!.((axa, axb, axc, axd), (policya, policyb, policyc, policyd); markersize
 limits!.((axa, axb, axc, axd), -1, Ec+1, 3.25, 0.75)
 
 ## plotting the central heatmap
-ax1 = Axis(gb[1, 1]; ylabel = "Hunting ability ϕ", xlabel = "Dangerous prey availability ρ", aspect = DataAspect())
+ax1 = Axis(gb[1, 1]; ylabel = rich("Capture probability ", rich("ϕ", font = :italic)), xlabel = rich("Dangerous prey availability ", rich("ρ", font = :italic)), aspect = DataAspect())
 hm = heatmap!(ax1, ρ, ϕ, policy_color_grid; rasterize = 2)
 
 ## Creating the ternary colormap legend for heatmap 
